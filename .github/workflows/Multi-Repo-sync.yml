@@ -23,7 +23,7 @@ jobs:
           git config --global user.name "Github-Action-Bot"
           git config --global user.email "action@github.com"
 
-      - name: Sync Packages (Smart Version Compare)
+      - name: Sync Packages (Strict Version Priority)
         run: |
           # 1. 保护性清空当前仓库
           find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'README.md' ! -name 'README_zh.md' ! -name '.' -exec rm -rf {} +
@@ -46,52 +46,35 @@ jobs:
                 REPO_URL="$REPO_CONF"
                 TARGET_BRANCH="master"
             fi
-            echo "正在抓取: $REPO_URL ($TARGET_BRANCH)"
-
-            # 2. 将上游克隆到隔离区
+            
             rm -rf .tmp_sync/workspace
             git clone -b "$TARGET_BRANCH" --single-branch --depth 1 "$REPO_URL" .tmp_sync/workspace --quiet
-            
-            # 3. 剔除上游不需要的 Git 目录
             rm -rf .tmp_sync/workspace/.git .tmp_sync/workspace/.github
 
-            # 4. 【核心逻辑：版本优胜劣汰】
             for pkg in .tmp_sync/workspace/*; do
               if [ -d "$pkg" ]; then
                 pkg_name=$(basename "$pkg")
                 
                 if [ -d "./$pkg_name" ]; then
-                  # 提取已存在包的版本号
-                  v_old="0"
-                  if [ -f "./$pkg_name/Makefile" ]; then
-                    v_old=$(grep -m 1 -E "^PKG_VERSION:?=" "./$pkg_name/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
-                  fi
-                  
-                  # 提取新抓取包的版本号
-                  v_new="0"
-                  if [ -f "$pkg/Makefile" ]; then
-                    v_new=$(grep -m 1 -E "^PKG_VERSION:?=" "$pkg/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
-                  fi
+                  v_old="0"; [ -f "./$pkg_name/Makefile" ] && v_old=$(grep -m 1 -E "^PKG_VERSION:?=" "./$pkg_name/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
+                  v_new="0"; [ -f "$pkg/Makefile" ] && v_new=$(grep -m 1 -E "^PKG_VERSION:?=" "$pkg/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
 
-                  # 比较版本 (使用 sort -V 处理 1.2.10 > 1.2.2 的情况)
-                  # 如果新版本 >= 旧版本，则替换
                   HIGHER=$(printf '%s\n%s' "$v_old" "$v_new" | sort -V | tail -n1)
                   
-                  if [ "$HIGHER" == "$v_new" ]; then
+                  # 【核心逻辑：严格大于判断】
+                  if [ "$v_new" != "$v_old" ] && [ "$HIGHER" == "$v_new" ]; then
                     echo "🆙 更新 [$pkg_name]: $v_old -> $v_new"
                     rm -rf "./$pkg_name"
                     mv "$pkg" "./"
                   else
-                    echo "⏭️ 跳过 [$pkg_name]: 当前已是较新版本 $v_old"
+                    echo "⏭️ 跳过 [$pkg_name]: 保持原版本 $v_old"
                   fi
                 else
-                  # 根目录不存在此包，直接移入
                   mv "$pkg" "./"
                 fi
               fi
             done
           done
-
           rm -rf .tmp_sync
 
       - name: Final Custom Cleanup
