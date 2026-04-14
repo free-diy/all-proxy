@@ -23,9 +23,8 @@ jobs:
           git config --global user.name "Github-Action-Bot"
           git config --global user.email "action@github.com"
 
-      - name: Sync Packages (Strict Version & Binary Priority)
+      - name: Sync Packages (Safe Version & Binary Priority)
         run: |
-          # 1. 保护性清空当前仓库（保留必要的元数据文件）
           find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'README.md' ! -name 'README_zh.md' ! -name '.' -exec rm -rf {} +
 
           REPOS=(
@@ -35,17 +34,19 @@ jobs:
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
           )
 
-          # 创建一个独立的隔离区
           mkdir -p .tmp_sync
 
-          # =========================================================
-          # 定义精确提取完整版本号的函数 (包含 PKG_VERSION 和 PKG_RELEASE)
-          # =========================================================
           get_pkg_version() {
               local makefile="$1"
               if [ -f "$makefile" ]; then
-                  local ver=$(grep -m 1 -E "^[[:space:]]*PKG_VERSION[[:space:]]*[:?]*=" "$makefile" | sed 's/.*=[[:space:]]*//' | tr -d "\r\n\"'")
-                  local rel=$(grep -m 1 -E "^[[:space:]]*PKG_RELEASE[[:space:]]*[:?]*=" "$makefile" | sed 's/.*=[[:space:]]*//' | tr -d "\r\n\"'")
+                  # 提取 VERSION 和 RELEASE，并过滤掉常见的 Makefile 注释和引号
+                  local ver=$(grep -m 1 -E "^[[:space:]]*PKG_VERSION[[:space:]]*[:?]*=" "$makefile" | sed 's/.*=[[:space:]]*//' | tr -d "\r\n\"' ")
+                  local rel=$(grep -m 1 -E "^[[:space:]]*PKG_RELEASE[[:space:]]*[:?]*=" "$makefile" | sed 's/.*=[[:space:]]*//' | tr -d "\r\n\"' ")
+                  
+                  # 安全检查：如果版本号包含 $ 或 ( ) 等字符，说明是动态变量，dpkg 无法处理
+                  if [[ "$ver" == *\$* || "$ver" == *\(* ]]; then ver="0.0.0"; fi
+                  if [[ "$rel" == *\$* || "$rel" == *\(* ]]; then rel="0"; fi
+                  
                   [ -z "$ver" ] && ver="0"
                   [ -z "$rel" ] && rel="0"
                   echo "${ver}-${rel}"
@@ -65,19 +66,14 @@ jobs:
             fi
             echo "正在抓取: $REPO_URL ($TARGET_BRANCH)"
 
-            # 将上游克隆到隔离区
             rm -rf .tmp_sync/workspace
             git clone -b "$TARGET_BRANCH" --single-branch --depth 1 "$REPO_URL" .tmp_sync/workspace --quiet
-            
-            # 剔除上游不需要的根目录文件
             rm -rf .tmp_sync/workspace/.git .tmp_sync/workspace/.github
 
-            # 遍历并处理插件包
             for pkg in .tmp_sync/workspace/*; do
               if [ -d "$pkg" ]; then
                 pkg_name=$(basename "$pkg")
                 
-                # 如果根目录已经存在同名的包，执行严格判断
                 if [ -d "./$pkg_name" ]; then
                   v_old=$(get_pkg_version "./$pkg_name/Makefile")
                   is_old_bin=0; [ -d "./$pkg_name/files" ] && is_old_bin=1
@@ -85,70 +81,47 @@ jobs:
                   v_new=$(get_pkg_version "$pkg/Makefile")
                   is_new_bin=0; [ -d "$pkg/files" ] && is_new_bin=1
 
-                  # 在 Action 日志中清晰打印当前对比状态，方便后期排错
-                  echo "🔎 对比 [$pkg_name]: 现有版本 $v_old (含files:$is_old_bin) | 上游版本 $v_new (含files:$is_new_bin)"
+                  echo "🔎 对比 [$pkg_name]: 现有 $v_old (files:$is_old_bin) | 上游 $v_new (files:$is_new_bin)"
 
                   SHOULD_REPLACE=0
-                  
-                  # 核心修复：使用 dpkg --compare-versions 进行专业的 Linux 风格版本对比
-                  if dpkg --compare-versions "$v_new" gt "$v_old"; then
-                    SHOULD_REPLACE=1
-                    echo "🆙 发现更高版本: $v_old -> $v_new"
-                  elif dpkg --compare-versions "$v_new" eq "$v_old"; then
-                    # 版本严格相同时，才启动 files 二进制目录优选逻辑
-                    if [ $is_new_bin -eq 1 ] && [ $is_old_bin -eq 0 ]; then
+                  # 只有当 v_new 不是 0.0.0 时才进行版本比较（防止因为看不懂 Makefile 而误杀）
+                  if [[ "$v_new" != "0.0.0-0" ]]; then
+                    if dpkg --compare-versions "$v_new" gt "$v_old" 2>/dev/null; then
                       SHOULD_REPLACE=1
-                      echo "💎 版本相同 ($v_new)，优先选择含 files 的二进制结构"
+                      echo "🆙 发现更高版本: $v_old -> $v_new"
+                    elif dpkg --compare-versions "$v_new" eq "$v_old" 2>/dev/null; then
+                      if [ $is_new_bin -eq 1 ] && [ $is_old_bin -eq 0 ]; then
+                        SHOULD_REPLACE=1
+                        echo "💎 版本相同 ($v_new)，优先选择二进制结构"
+                      fi
                     fi
                   fi
 
                   if [ $SHOULD_REPLACE -eq 1 ]; then
-                    # 彻底清空旧包，移入新包
                     rm -rf "./$pkg_name"
                     mv "$pkg" "./"
                     echo "✅ 已执行替换。"
                   else
-                    echo "⏭️ 跳过替换，保留当前更优包。"
+                    echo "⏭️ 跳过替换。"
                   fi
                 else
-                  # 如果不存在同名包，直接移入
                   mv "$pkg" "./"
                 fi
               fi
             done
           done
-
-          # 清理隔离区
           rm -rf .tmp_sync
 
       - name: Final Custom Cleanup
         run: |
-          # 清除指定黑名单文件
-          DELETE_LIST=(
-            ".github"
-            "LICENSE"
-            "LICENSE.md"
-            "COPYING"
-            "README.md"
-            "README_zh.md"
-            ".gitignore"
-            ".gitattributes"
-            "docs"
-            "test"
-            "tests"
-            "*.log"
-          )
-
-          echo "执行定向清理..."
+          DELETE_LIST=(".github" "LICENSE" "LICENSE.md" "COPYING" "README.md" "README_zh.md" ".gitignore" ".gitattributes" "docs" "test" "tests" "*.log")
           for ITEM in "${DELETE_LIST[@]}"; do
             if [[ "$ITEM" == "README.md" || "$ITEM" == "README_zh.md" || "$ITEM" == ".github" ]]; then
-                # 保护根目录（-mindepth 2），只删插件内的
                 find . -mindepth 2 -name "$ITEM" -exec rm -rf {} +
             else
                 find . -name "$ITEM" -exec rm -rf {} +
             fi
           done
-          
           find . -type d -empty -delete || true
 
       - name: Commit and Push
@@ -157,10 +130,9 @@ jobs:
         run: |
           git add .
           git checkout HEAD -- .github/workflows || true
-          
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Strict Version Priority)"
+            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Safe Versioning)"
             git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main --force
           else
-            echo "仓库内容没有变化，跳过本次提交。"
+            echo "无变化，跳过。"
           fi
