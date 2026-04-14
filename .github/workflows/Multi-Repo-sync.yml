@@ -61,13 +61,14 @@ jobs:
 
                   HIGHER=$(printf '%s\n%s' "$v_old" "$v_new" | sort -V | tail -n1)
                   
-                  # 【核心逻辑：严格大于判断】
+                  # 【核心修改】增加版本不相等的判断
                   if [ "$v_new" != "$v_old" ] && [ "$HIGHER" == "$v_new" ]; then
-                    echo "🆙 更新 [$pkg_name]: $v_old -> $v_new"
-                    rm -rf "./$pkg_name"
-                    mv "$pkg" "./"
+                     echo "🆙 发现更新 [$pkg_name]: $v_old -> $v_new"
+                     rm -rf "./$pkg_name"
+                     mv "$pkg" "./"
                   else
-                    echo "⏭️ 跳过 [$pkg_name]: 保持原版本 $v_old"
+                      # 版本相等时，由于不满足 v_new != v_old，会跳到这里，保留先前的包
+                      echo "⏭️ 跳过 [$pkg_name]: 保持优先级较高的版本 $v_old"
                   fi
                 else
                   mv "$pkg" "./"
