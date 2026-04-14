@@ -1,4 +1,29 @@
-- name: Sync Packages (Strict Version Priority)
+name: Multi-Repo Sync
+
+on:
+  schedule:
+    - cron: '0 0 * * *' 
+  workflow_dispatch: 
+
+jobs:
+  sync-and-clean:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Destination
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Config Git Identity
+        run: |
+          git config --global user.name "Github-Action-Bot"
+          git config --global user.email "action@github.com"
+
+      - name: Sync Packages (Strict Version Priority)
         run: |
           # 1. 保护性清空当前仓库
           find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'README.md' ! -name 'README_zh.md' ! -name '.' -exec rm -rf {} +
@@ -51,3 +76,47 @@
             done
           done
           rm -rf .tmp_sync
+
+      - name: Final Custom Cleanup
+        run: |
+          # 定义需要清理的“插件根目录垃圾”
+          DELETE_LIST=(
+            ".github"
+            "LICENSE"
+            "LICENSE.md"
+            "COPYING"
+            "README.md"
+            "README_zh.md"
+            ".gitignore"
+            ".gitattributes"
+            "docs"
+            "test"
+            "tests"
+            "*.log"
+          )
+
+          echo "执行精确打击清理 (仅限插件一级目录)..."
+          
+          for ITEM in "${DELETE_LIST[@]}"; do
+            # 【核心修改】
+            # -mindepth 2: 跳过仓库根目录 (例如保留你自己的 README.md)
+            # -maxdepth 2: 禁止进入插件的子目录 (例如保护 naiveproxy/src/test)
+            find . -mindepth 2 -maxdepth 2 -name "$ITEM" -exec rm -rf {} +
+          done
+          
+          # 清理产生的空目录（仅限一级插件目录下的空目录）
+          find . -mindepth 2 -maxdepth 2 -type d -empty -delete || true
+
+      - name: Commit and Push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git add .
+          git checkout HEAD -- .github/workflows || true
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Smart Version Priority)"
+            git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main --force
+          else
+            echo "仓库内容没有变化，跳过本次提交。"
+          fi
