@@ -23,9 +23,9 @@ jobs:
           git config --global user.name "Github-Action-Bot"
           git config --global user.email "action@github.com"
 
-      - name: Sync Packages (Strict Version Priority)
+      - name: Sync Packages (Version & Binary Priority)
         run: |
-          # 1. 保护性清空当前仓库
+          # 1. 初始保护性清空 (确保每次运行起点纯净)
           find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'README.md' ! -name 'README_zh.md' ! -name '.' -exec rm -rf {} +
 
           REPOS=(
@@ -46,7 +46,8 @@ jobs:
                 REPO_URL="$REPO_CONF"
                 TARGET_BRANCH="master"
             fi
-            
+            echo "正在同步上游: $REPO_URL"
+
             rm -rf .tmp_sync/workspace
             git clone -b "$TARGET_BRANCH" --single-branch --depth 1 "$REPO_URL" .tmp_sync/workspace --quiet
             rm -rf .tmp_sync/workspace/.git .tmp_sync/workspace/.github
@@ -56,20 +57,36 @@ jobs:
                 pkg_name=$(basename "$pkg")
                 
                 if [ -d "./$pkg_name" ]; then
+                  # 提取旧包信息
                   v_old="0"; [ -f "./$pkg_name/Makefile" ] && v_old=$(grep -m 1 -E "^PKG_VERSION:?=" "./$pkg_name/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
-                  v_new="0"; [ -f "$pkg/Makefile" ] && v_new=$(grep -m 1 -E "^PKG_VERSION:?=" "$pkg/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
+                  is_old_bin=0; [ -d "./$pkg_name/files" ] && is_old_bin=1
 
+                  # 提取新包信息
+                  v_new="0"; [ -f "$pkg/Makefile" ] && v_new=$(grep -m 1 -E "^PKG_VERSION:?=" "$pkg/Makefile" | cut -d'=' -f2 | tr -d '[:space:]"') || true
+                  is_new_bin=0; [ -d "$pkg/files" ] && is_new_bin=1
+
+                  # 比较版本
                   HIGHER=$(printf '%s\n%s' "$v_old" "$v_new" | sort -V | tail -n1)
-                  
-                  # 【核心逻辑：严格大于判断】
+
+                  SHOULD_REPLACE=0
+                  # 判定准则 1：版本确实更高
                   if [ "$v_new" != "$v_old" ] && [ "$HIGHER" == "$v_new" ]; then
-                    echo "🆙 更新 [$pkg_name]: $v_old -> $v_new"
+                    SHOULD_REPLACE=1
+                    echo "🆙 发现新版本 [$pkg_name]: $v_old -> $v_new"
+                  # 判定准则 2：版本相同，但新包是二进制版(含files)而旧包不是
+                  elif [ "$v_new" == "$v_old" ] && [ $is_new_bin -eq 1 ] && [ $is_old_bin -eq 0 ]; then
+                    SHOULD_REPLACE=1
+                    echo "💎 版本相同，优先选择二进制版结构 [$pkg_name]"
+                  fi
+
+                  if [ $SHOULD_REPLACE -eq 1 ]; then
                     rm -rf "./$pkg_name"
                     mv "$pkg" "./"
                   else
-                    echo "⏭️ 跳过 [$pkg_name]: 保持原版本 $v_old"
+                    echo "⏭️ 跳过 [$pkg_name]: 保持当前版本 $v_old"
                   fi
                 else
+                  # 目录不存在，直接移入
                   mv "$pkg" "./"
                 fi
               fi
@@ -79,32 +96,13 @@ jobs:
 
       - name: Final Custom Cleanup
         run: |
-          # 定义需要清理的“插件根目录垃圾”
-          DELETE_LIST=(
-            ".github"
-            "LICENSE"
-            "LICENSE.md"
-            "COPYING"
-            "README.md"
-            "README_zh.md"
-            ".gitignore"
-            ".gitattributes"
-            "docs"
-            "test"
-            "tests"
-            "*.log"
-          )
-
-          echo "执行精确打击清理 (仅限插件一级目录)..."
-          
+          DELETE_LIST=(".github" "LICENSE" "LICENSE.md" "COPYING" "README.md" "README_zh.md" ".gitignore" ".gitattributes" "docs" "test" "tests" "*.log")
+          echo "执行插件内杂物清理..."
           for ITEM in "${DELETE_LIST[@]}"; do
-            # 【核心修改】
-            # -mindepth 2: 跳过仓库根目录 (例如保留你自己的 README.md)
-            # -maxdepth 2: 禁止进入插件的子目录 (例如保护 naiveproxy/src/test)
+            # 严格限制深度为2，仅清理插件一级目录下匹配的文件
             find . -mindepth 2 -maxdepth 2 -name "$ITEM" -exec rm -rf {} +
           done
-          
-          # 清理产生的空目录（仅限一级插件目录下的空目录）
+          # 清理插件下一级的空目录
           find . -mindepth 2 -maxdepth 2 -type d -empty -delete || true
 
       - name: Commit and Push
@@ -115,8 +113,8 @@ jobs:
           git checkout HEAD -- .github/workflows || true
           
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Smart Version Priority)"
+            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Version & Binary Strategy)"
             git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main --force
           else
-            echo "仓库内容没有变化，跳过本次提交。"
+            echo "无变化，跳过提交。"
           fi
