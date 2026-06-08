@@ -30,7 +30,7 @@ jobs:
           REPOS=(
             "https://github.com/Openwrt-Passwall/openwrt-passwall-packages:main"
             "https://github.com/Openwrt-Passwall/openwrt-passwall:main"
-            "https://github.com/fw876/helloworld:master"
+            "https://github.com/fw876/helloworld:dev"
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
           )
 
