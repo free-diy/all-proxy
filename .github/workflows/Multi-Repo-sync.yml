@@ -44,6 +44,7 @@ jobs:
             "ci"
             "mihomo-alpha"
             "*.sh"
+            "mihomo"
           )
 
           mkdir -p .tmp_sync
