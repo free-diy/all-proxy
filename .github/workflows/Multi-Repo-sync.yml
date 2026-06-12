@@ -33,6 +33,7 @@ jobs:
             "https://github.com/fw876/helloworld:dev"
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
             "https://github.com/kenzok8/openwrt-daede:main"
+            "https://github.com/nikkinikki-org/OpenWrt-nikki:main"
           )
 
           # ==========================================
@@ -41,6 +42,8 @@ jobs:
           EXCLUDE_LIST=(
             "scripts"
             "ci"
+            "mihomo-alpha"
+            "*.sh"
           )
 
           mkdir -p .tmp_sync
@@ -85,7 +88,7 @@ jobs:
               # ==========================================
               is_excluded=0
               for ex in "${EXCLUDE_LIST[@]}"; do
-                if [ "$pkg_name" == "$ex" ]; then
+                if [[ "$pkg_name" == $ex ]]; then
                   is_excluded=1
                   break
                 fi
