@@ -1,4 +1,9 @@
-# all-proxy        
+# all-proxy
+DAE 编译环境
+```bash
+apt-get install -y npm
+npm install -g pnpm
+```
 DAE 依赖 eBPF 和 BTF。请在 .config 中添加以下内核配置以启用相关支持：
 ```bash
 CONFIG_DEVEL=y
