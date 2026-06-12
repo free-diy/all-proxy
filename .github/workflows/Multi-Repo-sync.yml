@@ -32,6 +32,15 @@ jobs:
             "https://github.com/Openwrt-Passwall/openwrt-passwall:main"
             "https://github.com/fw876/helloworld:dev"
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
+            "https://github.com/kenzok8/openwrt-daede:main"
+          )
+
+          # ==========================================
+          # 在这里自定义需要排除的文件或文件夹名称
+          # ==========================================
+          EXCLUDE_LIST=(
+            "scripts"
+            "ci"
           )
 
           mkdir -p .tmp_sync
@@ -39,11 +48,9 @@ jobs:
           get_pkg_version() {
               local makefile="$1"
               if [ -f "$makefile" ]; then
-                  # 提取 VERSION 和 RELEASE，并过滤掉常见的 Makefile 注释和引号
                   local ver=$(grep -m 1 -E "^[[:space:]]*PKG_VERSION[[:space:]]*[:?]*=" "$makefile" | sed 's/.*=[[:space:]]*//' | tr -d "\r\n\"' ")
                   local rel=$(grep -m 1 -E "^[[:space:]]*PKG_RELEASE[[:space:]]*[:?]*=" "$makefile" | sed 's/.*=[[:space:]]*//' | tr -d "\r\n\"' ")
                   
-                  # 安全检查：如果版本号包含 $ 或 ( ) 等字符，说明是动态变量，dpkg 无法处理
                   if [[ "$ver" == *\$* || "$ver" == *\(* ]]; then ver="0.0.0"; fi
                   if [[ "$rel" == *\$* || "$rel" == *\(* ]]; then rel="0"; fi
                   
@@ -71,9 +78,26 @@ jobs:
             rm -rf .tmp_sync/workspace/.git .tmp_sync/workspace/.github
 
             for pkg in .tmp_sync/workspace/*; do
+              pkg_name=$(basename "$pkg")
+              
+              # ==========================================
+              # 排除逻辑：判断当前项是否在排除列表中
+              # ==========================================
+              is_excluded=0
+              for ex in "${EXCLUDE_LIST[@]}"; do
+                if [ "$pkg_name" == "$ex" ]; then
+                  is_excluded=1
+                  break
+                fi
+              done
+              
+              if [ $is_excluded -eq 1 ]; then
+                echo "🚫 命中排除规则，跳过同步: $pkg_name"
+                continue
+              fi
+              # ==========================================
+
               if [ -d "$pkg" ]; then
-                pkg_name=$(basename "$pkg")
-                
                 if [ -d "./$pkg_name" ]; then
                   v_old=$(get_pkg_version "./$pkg_name/Makefile")
                   is_old_bin=0; [ -d "./$pkg_name/files" ] && is_old_bin=1
@@ -84,7 +108,6 @@ jobs:
                   echo "🔎 对比 [$pkg_name]: 现有 $v_old (files:$is_old_bin) | 上游 $v_new (files:$is_new_bin)"
 
                   SHOULD_REPLACE=0
-                  # 只有当 v_new 不是 0.0.0 时才进行版本比较（防止因为看不懂 Makefile 而误杀）
                   if [[ "$v_new" != "0.0.0-0" ]]; then
                     if dpkg --compare-versions "$v_new" gt "$v_old" 2>/dev/null; then
                       SHOULD_REPLACE=1
