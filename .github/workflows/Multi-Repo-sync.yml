@@ -41,6 +41,7 @@ jobs:
           # ==========================================
           EXCLUDE_LIST=(
             "scripts"
+            "ci"
             "mihomo-alpha"
             "*.sh"
             "mihomo"
