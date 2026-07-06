@@ -45,6 +45,7 @@ jobs:
             "ci"
             "*.sh"
             "mihomo"
+            "README"
           )
 
           mkdir -p .tmp_sync
