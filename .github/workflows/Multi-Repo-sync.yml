@@ -25,7 +25,7 @@ jobs:
 
       - name: Sync Packages (Safe Version & Binary Priority)
         run: |
-          find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'README.md' ! -name 'README_zh.md' ! -name '.' -exec rm -rf {} +
+          find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'README.md' ! -name 'README_zh.md' ! -name 'README' ! -name '.' -exec rm -rf {} +
 
           REPOS=(
             "https://github.com/Openwrt-Passwall/openwrt-passwall-packages:main"
@@ -34,6 +34,7 @@ jobs:
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
             "https://github.com/kenzok8/openwrt-daede:main"
             "https://github.com/nikkinikki-org/OpenWrt-nikki:main"
+            "https://github.com/vernesong/OpenClash:master"
             "https://github.com/immortalwrt/homeproxy:master:luci-app-homeproxy"
           )
 
@@ -45,7 +46,8 @@ jobs:
             "ci"
             "*.sh"
             "mihomo"
-            "README"
+            "img"
+            "announcement"
           )
 
           mkdir -p .tmp_sync
