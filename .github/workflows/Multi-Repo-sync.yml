@@ -34,11 +34,12 @@ jobs:
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
             "https://github.com/kenzok8/openwrt-daede:main"
             "https://github.com/nikkinikki-org/OpenWrt-nikki:main"
+            "https://github.com/immortalwrt/homeproxy:master:luci-app-homeproxy"
           )
 
-          # ==========================================
-          # 在这里自定义需要排除的文件或文件夹名称
-          # ==========================================
+          # ==================
+          # 全局自定义排除列表
+          # ==================
           EXCLUDE_LIST=(
             "scripts"
             "ci"
@@ -67,74 +68,126 @@ jobs:
 
           for REPO_CONF in "${REPOS[@]}"; do
             echo "================================================="
-            if [[ "$REPO_CONF" =~ ^(.+):([^:]+)$ ]]; then
+            if [[ "$REPO_CONF" =~ ^([^:]+):([^:]+):([^:]+)$ ]]; then
                 REPO_URL="${BASH_REMATCH[1]}"
                 TARGET_BRANCH="${BASH_REMATCH[2]}"
+                CUSTOM_DIR="${BASH_REMATCH[3]}"
+            elif [[ "$REPO_CONF" =~ ^([^:]+):([^:]+)$ ]]; then
+                REPO_URL="${BASH_REMATCH[1]}"
+                TARGET_BRANCH="${BASH_REMATCH[2]}"
+                CUSTOM_DIR=""
             else
                 REPO_URL="$REPO_CONF"
                 TARGET_BRANCH="master"
+                CUSTOM_DIR=""
             fi
-            echo "正在抓取: $REPO_URL ($TARGET_BRANCH)"
+            
+            if [ -n "$CUSTOM_DIR" ]; then
+                echo "正在抓取(单包模式): $REPO_URL ($TARGET_BRANCH) -> 目标: $CUSTOM_DIR"
+            else
+                echo "正在抓取(多包模式): $REPO_URL ($TARGET_BRANCH)"
+            fi
 
             rm -rf .tmp_sync/workspace
             git clone -b "$TARGET_BRANCH" --single-branch --depth 1 "$REPO_URL" .tmp_sync/workspace --quiet
             rm -rf .tmp_sync/workspace/.git .tmp_sync/workspace/.github
 
-            for pkg in .tmp_sync/workspace/*; do
-              pkg_name=$(basename "$pkg")
-              
-              # ==========================================
-              # 排除逻辑：判断当前项是否在排除列表中
-              # ==========================================
-              is_excluded=0
+            if [ -n "$CUSTOM_DIR" ]; then
+              pkg_name="$CUSTOM_DIR"
+
               for ex in "${EXCLUDE_LIST[@]}"; do
-                if [[ "$pkg_name" == $ex ]]; then
-                  is_excluded=1
-                  break
-                fi
+                find .tmp_sync/workspace -maxdepth 1 -name "$ex" -exec rm -rf {} + 2>/dev/null || true
               done
               
-              if [ $is_excluded -eq 1 ]; then
-                echo "🚫 命中排除规则，跳过同步: $pkg_name"
-                continue
-              fi
-              # ==========================================
+              if [ -d "./$pkg_name" ]; then
+                v_old=$(get_pkg_version "./$pkg_name/Makefile")
+                is_old_bin=0; [ -d "./$pkg_name/files" ] && is_old_bin=1
 
-              if [ -d "$pkg" ]; then
-                if [ -d "./$pkg_name" ]; then
-                  v_old=$(get_pkg_version "./$pkg_name/Makefile")
-                  is_old_bin=0; [ -d "./$pkg_name/files" ] && is_old_bin=1
+                v_new=$(get_pkg_version ".tmp_sync/workspace/Makefile")
+                is_new_bin=0; [ -d ".tmp_sync/workspace/files" ] && is_new_bin=1
 
-                  v_new=$(get_pkg_version "$pkg/Makefile")
-                  is_new_bin=0; [ -d "$pkg/files" ] && is_new_bin=1
+                echo "🔎 对比 [$pkg_name]: 现有 $v_old (files:$is_old_bin) | 上游 $v_new (files:$is_new_bin)"
 
-                  echo "🔎 对比 [$pkg_name]: 现有 $v_old (files:$is_old_bin) | 上游 $v_new (files:$is_new_bin)"
-
-                  SHOULD_REPLACE=0
-                  if [[ "$v_new" != "0.0.0-0" ]]; then
-                    if dpkg --compare-versions "$v_new" gt "$v_old" 2>/dev/null; then
+                SHOULD_REPLACE=0
+                if [[ "$v_new" != "0.0.0-0" ]]; then
+                  if dpkg --compare-versions "$v_new" gt "$v_old" 2>/dev/null; then
+                    SHOULD_REPLACE=1
+                    echo "🆙 发现更高版本: $v_old -> $v_new"
+                  elif dpkg --compare-versions "$v_new" eq "$v_old" 2>/dev/null; then
+                    if [ $is_new_bin -eq 1 ] && [ $is_old_bin -eq 0 ]; then
                       SHOULD_REPLACE=1
-                      echo "🆙 发现更高版本: $v_old -> $v_new"
-                    elif dpkg --compare-versions "$v_new" eq "$v_old" 2>/dev/null; then
-                      if [ $is_new_bin -eq 1 ] && [ $is_old_bin -eq 0 ]; then
-                        SHOULD_REPLACE=1
-                        echo "💎 版本相同 ($v_new)，优先选择二进制结构"
-                      fi
+                      echo "💎 版本相同 ($v_new)，优先选择二进制结构"
                     fi
                   fi
-
-                  if [ $SHOULD_REPLACE -eq 1 ]; then
-                    rm -rf "./$pkg_name"
-                    mv "$pkg" "./"
-                    echo "✅ 已执行替换。"
-                  else
-                    echo "⏭️ 跳过替换。"
-                  fi
-                else
-                  mv "$pkg" "./"
                 fi
+
+                if [ $SHOULD_REPLACE -eq 1 ]; then
+                  rm -rf "./$pkg_name"
+                  mkdir -p "./$pkg_name"
+                  find .tmp_sync/workspace -mindepth 1 -maxdepth 1 -exec mv {} "./$pkg_name/" \; 2>/dev/null || true
+                  echo "✅ 已执行替换。"
+                else
+                  echo "⏭️ 跳过替换。"
+                fi
+              else
+                mkdir -p "./$pkg_name"
+                find .tmp_sync/workspace -mindepth 1 -maxdepth 1 -exec mv {} "./$pkg_name/" \; 2>/dev/null || true
+                echo "✅ 已新增单包: $pkg_name"
               fi
-            done
+            else
+
+              for pkg in .tmp_sync/workspace/*; do
+                if [ -d "$pkg" ]; then
+                  pkg_name=$(basename "$pkg")
+                  
+                  is_excluded=0
+                  for ex in "${EXCLUDE_LIST[@]}"; do
+                    if [[ "$pkg_name" == $ex ]]; then
+                      is_excluded=1
+                      break
+                    fi
+                  done
+                  
+                  if [ $is_excluded -eq 1 ]; then
+                    echo "🚫 命中排除规则，跳过同步: $pkg_name"
+                    continue
+                  fi
+
+                  if [ -d "./$pkg_name" ]; then
+                    v_old=$(get_pkg_version "./$pkg_name/Makefile")
+                    is_old_bin=0; [ -d "./$pkg_name/files" ] && is_old_bin=1
+
+                    v_new=$(get_pkg_version "$pkg/Makefile")
+                    is_new_bin=0; [ -d "$pkg/files" ] && is_new_bin=1
+
+                    echo "🔎 对比 [$pkg_name]: 现有 $v_old (files:$is_old_bin) | 上游 $v_new (files:$is_new_bin)"
+
+                    SHOULD_REPLACE=0
+                    if [[ "$v_new" != "0.0.0-0" ]]; then
+                      if dpkg --compare-versions "$v_new" gt "$v_old" 2>/dev/null; then
+                        SHOULD_REPLACE=1
+                        echo "🆙 发现更高版本: $v_old -> $v_new"
+                      elif dpkg --compare-versions "$v_new" eq "$v_old" 2>/dev/null; then
+                        if [ $is_new_bin -eq 1 ] && [ $is_old_bin -eq 0 ]; then
+                          SHOULD_REPLACE=1
+                          echo "💎 版本相同 ($v_new)，优先选择二进制结构"
+                        fi
+                      fi
+                    fi
+
+                    if [ $SHOULD_REPLACE -eq 1 ]; then
+                      rm -rf "./$pkg_name"
+                      mv "$pkg" "./"
+                      echo "✅ 已执行替换。"
+                    else
+                      echo "⏭️ 跳过替换。"
+                    fi
+                  else
+                    mv "$pkg" "./"
+                  fi
+                fi
+              done
+            fi
           done
           rm -rf .tmp_sync
 
@@ -157,7 +210,7 @@ jobs:
           git add .
           git checkout HEAD -- .github/workflows || true
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Safe Versioning)"
+            git commit -m "Auto-Sync: $(date +'%Y-%m-%d %H:%M:%S') (Advanced Granular Filtering)"
             git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main --force
           else
             echo "无变化，跳过。"
