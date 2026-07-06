@@ -196,9 +196,9 @@ jobs:
 
       - name: Final Custom Cleanup
         run: |
-          DELETE_LIST=(".github" "LICENSE" "LICENSE.md" "COPYING" "README.md" "README_zh.md" ".gitignore" ".gitattributes" "docs" "test" "tests" "*.log")
+          DELETE_LIST=(".github" "LICENSE" "LICENSE.md" "COPYING" "README.md" "README_zh.md" "README" ".gitignore" ".gitattributes" "docs" "test" "tests" "*.log")
           for ITEM in "${DELETE_LIST[@]}"; do
-            if [[ "$ITEM" == "README.md" || "$ITEM" == "README_zh.md" || "$ITEM" == ".github" ]]; then
+            if [[ "$ITEM" == "README.md" || "$ITEM" == "README_zh.md" || "$ITEM" == "README" || "$ITEM" == ".github" ]]; then
                 find . -mindepth 2 -name "$ITEM" -exec rm -rf {} +
             else
                 find . -name "$ITEM" -exec rm -rf {} +
