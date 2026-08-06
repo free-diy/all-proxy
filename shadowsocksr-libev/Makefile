@@ -51,8 +51,6 @@ CONFIGURE_ARGS += \
 	--disable-assert \
 	--enable-system-shared-lib
 
-# TARGET_CFLAGS += -flto
-# TARGET_LDFLAGS += -Wl,--gc-sections,--as-needed
 TARGET_LDFLAGS += -Wl,--as-needed
 
 $(foreach component,$(SHADOWSOCKSR_COMPONENTS), \
