@@ -32,7 +32,6 @@ jobs:
             "https://github.com/Openwrt-Passwall/openwrt-passwall:main"
             "https://github.com/fw876/helloworld:dev"
             "https://github.com/Openwrt-Passwall/openwrt-passwall2:main"
-            "https://github.com/kenzok8/openwrt-daede:main"
             "https://github.com/nikkinikki-org/OpenWrt-nikki:main"
             "https://github.com/vernesong/OpenClash:master"
             "https://github.com/immortalwrt/homeproxy:master:luci-app-homeproxy"
